@@ -23,22 +23,18 @@ user_sessions = {}
 def create_driver():
     options = webdriver.ChromeOptions()
     options.binary_location = "/usr/bin/chromium"
-    
+
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
-    
-options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    
-options.add_argument("--window-size=1920,1080")
-    service = Service("/usr/bin/chromedriver")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
 
     driver = webdriver.Chrome(
-        service=service,
+        service=Service(ChromeDriverManager().install()),
         options=options
     )
-
-    driver.set_page_load_timeout(30)
 
     return driver
 
