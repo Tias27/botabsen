@@ -7,6 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -15,7 +16,7 @@ TOKEN = os.getenv("TOKEN")
 
 user_sessions = {}
 
-# ================= DRIVER =================
+
 def create_driver():
     options = webdriver.ChromeOptions()
     options.binary_location = "/usr/bin/chromium"
@@ -26,15 +27,17 @@ def create_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
 
+    service = Service("/usr/bin/chromedriver")
+
     driver = webdriver.Chrome(
-        executable_path="/usr/bin/chromedriver",
+        service=service,
         options=options
     )
 
     return driver
 
 
-# ================= UTIL =================
+
 def klik_popup(driver):
     try:
         WebDriverWait(driver, 5).until(
@@ -71,7 +74,7 @@ def ambil_nama_matkul(card, index):
         return f"Matkul ke-{index+1}"
 
 
-# ================= CORE =================
+
 def jalankan_absen_otomatis(nim):
     driver = create_driver()
 
@@ -131,7 +134,7 @@ def jalankan_absen_otomatis(nim):
         driver.quit()
 
 
-# ================= BOT =================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 Bot siap!\n\nGunakan:\n/absen NIM\nContoh:\n/absen 1223150000"
@@ -142,11 +145,15 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if user_sessions.get(chat_id) == "running":
-        await update.message.reply_text("⚠️ Masih ada proses berjalan.\nGunakan /end dulu.")
+        await update.message.reply_text(
+            "⚠️ Masih ada proses berjalan.\nGunakan /end dulu."
+        )
         return
 
     if not context.args:
-        await update.message.reply_text("❗ Format salah\nGunakan:\n/absen NIM")
+        await update.message.reply_text(
+            "❗ Format salah\nGunakan:\n/absen NIM"
+        )
         return
 
     nim = context.args[0]
@@ -163,19 +170,29 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def run_absen(chat_id, app, nim):
-    hasil = jalankan_absen_otomatis(nim)
+    try:
+        hasil = jalankan_absen_otomatis(nim)
 
-    teks = "📊 *Hasil Absen:*\n\n" + "\n\n".join(hasil)
+        teks = "📊 *Hasil Absen:*\n\n" + "\n\n".join(hasil)
 
-    asyncio.run(
-        app.bot.send_message(
-            chat_id=chat_id,
-            text=teks,
-            parse_mode="Markdown"
+        asyncio.run(
+            app.bot.send_message(
+                chat_id=chat_id,
+                text=teks,
+                parse_mode="Markdown"
+            )
         )
-    )
 
-    user_sessions[chat_id] = "done"
+    except Exception as e:
+        asyncio.run(
+            app.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Error:\n{str(e)}"
+            )
+        )
+
+    finally:
+        user_sessions[chat_id] = "done"
 
 
 async def end(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -184,12 +201,20 @@ async def end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Session di-reset. Silakan /absen lagi.")
 
 
-# ================= RUN =================
-app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("absen", absen))
-app.add_handler(CommandHandler("end", end))
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-print("BOT JALAN (FINAL FIX)...")
-app.run_polling()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("absen", absen))
+    app.add_handler(CommandHandler("end", end))
+
+    # 🔥 penting: bersihin webhook + pending
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    print("BOT JALAN FINAL 🚀")
+    await app.run_polling()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
