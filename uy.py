@@ -22,8 +22,11 @@ def create_driver():
     options = Options()
     options.binary_location = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
 
-    options.add_argument("--headless=new")
+    # ================= options.add_argument("--headless=new") =================
     options.add_argument("--no-sandbox")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+    )
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
 
