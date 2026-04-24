@@ -1,6 +1,5 @@
 import os
 import asyncio
-import threading
 import time
 
 from telegram import Update
@@ -13,13 +12,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ================= CONFIG =================
 TOKEN = os.getenv("TOKEN")
 URL = "https://absen.zatest11.my.id"
 
 user_sessions = {}
 
-# ================= SELENIUM =================
+# ================= DRIVER =================
 def create_driver():
     options = Options()
     options.binary_location = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
@@ -29,18 +27,12 @@ def create_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
 
-    # 🔥 bypass cloudflare dikit
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--start-maximized")
-
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
 
     service = Service(os.environ.get("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"))
 
     driver = webdriver.Chrome(service=service, options=options)
 
-    # 🔥 hide selenium
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
@@ -48,23 +40,20 @@ def create_driver():
     return driver
 
 
-# ================= LOGIC ABSEN =================
+# ================= LOGIC =================
 def run_absen(nim: str):
     try:
         driver = create_driver()
         wait = WebDriverWait(driver, 15)
 
         driver.get(URL)
-
-        # ⏳ biar ga ke-detect bot
         time.sleep(5)
 
-        # ❗ detect cloudflare
         if "cloudflare" in driver.page_source.lower():
             driver.quit()
-            return "⚠️ Kena Cloudflare, coba lagi beberapa detik"
+            return "⚠️ Kena Cloudflare, coba lagi"
 
-        # ===== INPUT NIM =====
+        # input nim
         try:
             input_nim = wait.until(
                 EC.presence_of_element_located((By.NAME, "nim"))
@@ -77,23 +66,15 @@ def run_absen(nim: str):
             driver.quit()
             return "❌ Input NIM tidak ditemukan"
 
-        input_nim.clear()
         input_nim.send_keys(nim)
 
-        # ===== LOGIN BUTTON =====
+        # klik login
         buttons = driver.find_elements(By.TAG_NAME, "button")
-        clicked = False
-
         for b in buttons:
-            if "login" in b.text.lower() or "masuk" in b.text.lower():
+            if "login" in b.text.lower():
                 b.click()
-                clicked = True
                 break
 
-        if not clicked and buttons:
-            buttons[0].click()
-
-        # ===== WAIT LOAD =====
         time.sleep(5)
 
         buttons = driver.find_elements(By.TAG_NAME, "button")
@@ -102,38 +83,27 @@ def run_absen(nim: str):
         count = 0
 
         for btn in buttons:
-            text = btn.text.lower()
-
-            if "absen" in text or "hadir" in text:
+            if "absen" in btn.text.lower():
                 count += 1
-
-                try:
-                    parent = btn.find_element(By.XPATH, "..")
-                    nama = parent.text.split("\n")[0]
-                except:
-                    nama = f"Matkul {count}"
-
                 try:
                     btn.click()
-                    hasil += f"✅ {nama}\n↳ Absen berhasil\n\n"
+                    hasil += f"✅ Matkul {count}\n"
                 except:
-                    hasil += f"⚠️ {nama}\n↳ Gagal klik\n\n"
+                    hasil += f"⚠️ Matkul {count} gagal\n"
 
         if count == 0:
-            hasil += "⚠️ Tidak ada tombol absen ditemukan"
+            hasil += "⚠️ Tidak ada absen"
 
         driver.quit()
-        return hasil.strip()
+        return hasil
 
     except Exception as e:
         return f"❌ Error:\n{str(e)}"
 
 
-# ================= BOT =================
+# ================= COMMAND =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 Bot siap!\nGunakan /absen NIM\nContoh: /absen 1223150000"
-    )
+    await update.message.reply_text("🤖 Bot siap! Gunakan /absen NIM")
 
 
 async def end(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,7 +115,7 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
     if user_sessions.get(uid):
-        await update.message.reply_text("⚠️ Masih jalan, pakai /end dulu")
+        await update.message.reply_text("⚠️ Masih proses, pakai /end dulu")
         return
 
     if not context.args:
@@ -157,18 +127,12 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("⏳ Proses...")
 
-    def worker():
-        result = run_absen(nim)
+    # 🔥 jalanin blocking selenium di thread aman
+    result = await asyncio.to_thread(run_absen, nim)
 
-        # 🔥 FIX async thread
-        asyncio.run_coroutine_threadsafe(
-            update.message.reply_text(result),
-            context.application.loop
-        )
+    await update.message.reply_text(result)
 
-        user_sessions[uid] = False
-
-    threading.Thread(target=worker).start()
+    user_sessions[uid] = False
 
 
 # ================= MAIN =================
