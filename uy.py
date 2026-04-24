@@ -16,7 +16,7 @@ TOKEN = os.getenv("TOKEN")
 
 user_sessions = {}
 
-
+# ================= DRIVER =================
 def create_driver():
     options = webdriver.ChromeOptions()
     options.binary_location = "/usr/bin/chromium"
@@ -29,15 +29,11 @@ def create_driver():
 
     service = Service("/usr/bin/chromedriver")
 
-    driver = webdriver.Chrome(
-        service=service,
-        options=options
-    )
-
+    driver = webdriver.Chrome(service=service, options=options)
     return driver
 
 
-
+# ================= UTIL =================
 def klik_popup(driver):
     try:
         WebDriverWait(driver, 5).until(
@@ -48,10 +44,8 @@ def klik_popup(driver):
 
         if "swal2-icon-success" in popup.get_attribute("class"):
             status = "success"
-        elif "swal2-icon-error" in popup.get_attribute("class"):
-            status = "error"
         else:
-            status = "info"
+            status = "error"
 
         ok_btn = driver.find_element(By.XPATH, "//button[text()='OK']")
         driver.execute_script("arguments[0].click();", ok_btn)
@@ -74,7 +68,7 @@ def ambil_nama_matkul(card, index):
         return f"Matkul ke-{index+1}"
 
 
-
+# ================= CORE =================
 def jalankan_absen_otomatis(nim):
     driver = create_driver()
 
@@ -134,7 +128,7 @@ def jalankan_absen_otomatis(nim):
         driver.quit()
 
 
-
+# ================= BOT =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 Bot siap!\n\nGunakan:\n/absen NIM\nContoh:\n/absen 1223150000"
@@ -145,22 +139,17 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if user_sessions.get(chat_id) == "running":
-        await update.message.reply_text(
-            "⚠️ Masih ada proses berjalan.\nGunakan /end dulu."
-        )
+        await update.message.reply_text("⚠️ Masih proses sebelumnya, tunggu ya.")
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "❗ Format salah\nGunakan:\n/absen NIM"
-        )
+        await update.message.reply_text("❗ Format: /absen NIM")
         return
 
     nim = context.args[0]
     user_sessions[chat_id] = "running"
 
-    await update.message.reply_text(f"⏳ Proses absen untuk NIM: {nim}")
-    await update.message.reply_text("🚀 Lagi di absenin sabar ya...")
+    await update.message.reply_text(f"⏳ Proses absen {nim}...")
 
     threading.Thread(
         target=run_absen,
@@ -198,23 +187,16 @@ def run_absen(chat_id, app, nim):
 async def end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_sessions[chat_id] = "done"
-    await update.message.reply_text("🔄 Session di-reset. Silakan /absen lagi.")
+    await update.message.reply_text("🔄 Reset. Silakan /absen lagi.")
 
 
+# ================= RUN =================
+app = ApplicationBuilder().token(TOKEN).build()
 
-async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("absen", absen))
+app.add_handler(CommandHandler("end", end))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("absen", absen))
-    app.add_handler(CommandHandler("end", end))
+print("BOT JALAN FINAL 🚀")
 
-    # 🔥 penting: bersihin webhook + pending
-    await app.bot.delete_webhook(drop_pending_updates=True)
-
-    print("BOT JALAN FINAL 🚀")
-    await app.run_polling()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+app.run_polling(drop_pending_updates=True)
