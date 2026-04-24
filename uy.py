@@ -8,16 +8,17 @@ from webdriver_manager.chrome import ChromeDriverManager
 import time
 import threading
 import asyncio
+import os
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = "8623275372:AAFDqWsowUMrdetfZhxBGzdVhc4OJIQM1Zs"
+TOKEN = os.getenv("TOKEN")
 
 user_sessions = {}
 def create_driver():
     options = webdriver.ChromeOptions()
-
+    option.binary_location = "/usr/bin/chromium"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
