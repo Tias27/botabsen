@@ -1,25 +1,21 @@
+import os
+import time
+import threading
+import asyncio
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-
-import time
-import threading
-import asyncio
-import os
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ambil token dari Railway ENV
 TOKEN = os.getenv("TOKEN")
 
 user_sessions = {}
 
-
-
+# ================= DRIVER =================
 def create_driver():
     options = webdriver.ChromeOptions()
     options.binary_location = "/usr/bin/chromium"
@@ -29,17 +25,16 @@ def create_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-blink-features=AutomationControlled")
 
     driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
+        executable_path="/usr/bin/chromedriver",
         options=options
     )
 
     return driver
 
 
-# ================= POPUP =================
+# ================= UTIL =================
 def klik_popup(driver):
     try:
         WebDriverWait(driver, 5).until(
@@ -64,7 +59,6 @@ def klik_popup(driver):
         return None
 
 
-# ================= AMBIL NAMA =================
 def ambil_nama_matkul(card, index):
     try:
         text = card.text.split("\n")
@@ -77,8 +71,8 @@ def ambil_nama_matkul(card, index):
         return f"Matkul ke-{index+1}"
 
 
-# ================= MAIN ABSEN =================
-def jalankan_absen_otomatis(nim_target, chat_id):
+# ================= CORE =================
+def jalankan_absen_otomatis(nim):
     driver = create_driver()
 
     try:
@@ -87,8 +81,9 @@ def jalankan_absen_otomatis(nim_target, chat_id):
         input_nim = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.NAME, "nim"))
         )
+
         input_nim.clear()
-        input_nim.send_keys(nim_target)
+        input_nim.send_keys(nim)
 
         driver.find_element(By.XPATH, "//button[contains(text(),'Ambil Jadwal')]").click()
 
@@ -99,53 +94,47 @@ def jalankan_absen_otomatis(nim_target, chat_id):
         index = 0
 
         while True:
-            # ⛔ stop kalau user cancel
-            if user_sessions.get(chat_id) != "running":
+            cards = WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located(
+                    (By.XPATH, "//div[.//button[contains(text(),'Absen')]]")
+                )
+            )
+
+            if index >= len(cards):
                 break
 
-            try:
-                cards = WebDriverWait(driver, 10).until(
-                    EC.presence_of_all_elements_located(
-                        (By.XPATH, "//div[.//button[contains(text(),'Absen')]]")
-                    )
-                )
+            card = cards[index]
+            nama = ambil_nama_matkul(card, index)
 
-                if index >= len(cards):
-                    break
+            tombol = card.find_element(By.XPATH, ".//button[contains(text(),'Absen')]")
 
-                card = cards[index]
-                nama = ambil_nama_matkul(card, index)
+            driver.execute_script("arguments[0].scrollIntoView();", tombol)
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", tombol)
 
-                tombol = card.find_element(By.XPATH, ".//button[contains(text(),'Absen')]")
+            status = klik_popup(driver)
 
-                driver.execute_script("arguments[0].scrollIntoView();", tombol)
-                time.sleep(1)
-                driver.execute_script("arguments[0].click();", tombol)
+            if status == "success":
+                hasil.append(f"✅ {nama}\n   ↳ Absen berhasil")
+            else:
+                hasil.append(f"⏰ {nama}\n   ↳ Belum dibuka / sudah absen")
 
-                status = klik_popup(driver)
-
-                if status == "success":
-                    hasil.append(f"✅ {nama}\n   ↳ Absen berhasil")
-                else:
-                    hasil.append(f"⏰ {nama}\n   ↳ Belum dibuka / sudah absen")
-
-                time.sleep(2)
-                index += 1
-
-            except:
-                hasil.append(f"⚠️ Matkul ke-{index+1} error")
-                index += 1
+            index += 1
+            time.sleep(2)
 
         return hasil
+
+    except Exception as e:
+        return [f"❌ Error:\n{str(e)}"]
 
     finally:
         driver.quit()
 
 
-# ================= TELEGRAM =================
+# ================= BOT =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Bot siap!\n\nGunakan:\n/absen NIM\n\nContoh:\n/absen 1223150000"
+        "🤖 Bot siap!\n\nGunakan:\n/absen NIM\nContoh:\n/absen 1223150000"
     )
 
 
@@ -153,15 +142,11 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if user_sessions.get(chat_id) == "running":
-        await update.message.reply_text(
-            "⚠️ Masih proses sebelumnya bro...\nTunggu atau /end"
-        )
+        await update.message.reply_text("⚠️ Masih ada proses berjalan.\nGunakan /end dulu.")
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "❗ Format salah\nGunakan:\n/absen NIM"
-        )
+        await update.message.reply_text("❗ Format salah\nGunakan:\n/absen NIM")
         return
 
     nim = context.args[0]
@@ -178,40 +163,25 @@ async def absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def run_absen(chat_id, app, nim):
-    try:
-        hasil = jalankan_absen_otomatis(nim, chat_id)
+    hasil = jalankan_absen_otomatis(nim)
 
-        teks = "📊 *Hasil Absen:*\n\n" + "\n\n".join(hasil)
+    teks = "📊 *Hasil Absen:*\n\n" + "\n\n".join(hasil)
 
-        asyncio.run(
-            app.bot.send_message(
-                chat_id=chat_id,
-                text=teks,
-                parse_mode="Markdown"
-            )
+    asyncio.run(
+        app.bot.send_message(
+            chat_id=chat_id,
+            text=teks,
+            parse_mode="Markdown"
         )
+    )
 
-    except Exception as e:
-        asyncio.run(
-            app.bot.send_message(
-                chat_id=chat_id,
-                text=f"❌ Error:\n{str(e)}"
-            )
-        )
-
-    finally:
-        # 🔥 penting: reset session
-        user_sessions.pop(chat_id, None)
+    user_sessions[chat_id] = "done"
 
 
 async def end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-
-    user_sessions.pop(chat_id, None)
-
-    await update.message.reply_text(
-        "🔄 Session di-reset. Silakan /absen lagi."
-    )
+    user_sessions[chat_id] = "done"
+    await update.message.reply_text("🔄 Session di-reset. Silakan /absen lagi.")
 
 
 # ================= RUN =================
@@ -221,5 +191,5 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("absen", absen))
 app.add_handler(CommandHandler("end", end))
 
-print("BOT JALAN (HEADLESS - FIXED)...")
+print("BOT JALAN (FINAL FIX)...")
 app.run_polling()
